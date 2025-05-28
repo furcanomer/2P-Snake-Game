@@ -1,0 +1,412 @@
+<!DOCTYPE html>
+<html lang="tr">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>İki Kişilik Yılan Oyunu</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <style>
+        body {
+            font-family: 'Inter', sans-serif;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            min-height: 100vh;
+            background-color: #1a202c; /* Tailwind gray-900 */
+            color: #e2e8f0; /* Tailwind gray-300 */
+            margin: 0;
+            padding: 20px;
+            box-sizing: border-box;
+        }
+        .game-container {
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            gap: 20px;
+            background-color: #2d3748; /* Tailwind gray-800 */
+            padding: 20px;
+            border-radius: 12px;
+            box-shadow: 0 10px 15px -3px rgba(0, 0, 0, 0.1), 0 4px 6px -2px rgba(0, 0, 0, 0.05);
+        }
+        canvas {
+            border: 2px solid #4a5568; /* Tailwind gray-600 */
+            border-radius: 8px;
+            background-color: #000; /* Siyah oyun alanı */
+        }
+        .info-panel {
+            display: flex;
+            flex-direction: column; /* Dikey düzen */
+            gap: 10px; /* Paneller arası boşluk */
+            width: 100%;
+            max-width: 400px; /* Canvas ile aynı genişlik */
+        }
+        .info-box {
+            background-color: #4a5568; /* Tailwind gray-600 */
+            padding: 10px 15px;
+            border-radius: 8px;
+            text-align: center;
+            font-size: 0.9rem;
+        }
+        .player-scores span {
+            margin: 0 10px;
+        }
+        .player1-text { color: #68d391; /* Tailwind green-400 */ }
+        .player2-text { color: #63b3ed; /* Tailwind blue-400 */ }
+        button {
+            background-color: #4299e1; /* Tailwind blue-500 */
+            color: white;
+            padding: 10px 20px;
+            border: none;
+            border-radius: 8px;
+            font-size: 1rem;
+            cursor: pointer;
+            transition: background-color 0.3s;
+        }
+        button:hover {
+            background-color: #3182ce; /* Tailwind blue-600 */
+        }
+        button:disabled {
+            background-color: #a0aec0; /* Tailwind gray-400 */
+            cursor: not-allowed;
+        }
+        .message-box {
+            min-height: 40px;
+            padding: 10px;
+            border-radius: 8px;
+            background-color: #38a169; /* Tailwind green-600 for positive messages */
+            color: white;
+            text-align: center;
+            font-weight: bold;
+        }
+        .game-over-message {
+            background-color: #e53e3e; /* Tailwind red-600 */
+        }
+    </style>
+</head>
+<body>
+    <div class="game-container">
+        <h1 class="text-3xl font-bold mb-4 text-white">Yılan Oyunu - Takım Çalışması!</h1>
+
+        <div class="info-panel">
+            <div id="playerInfo" class="info-box player-scores">
+                Oyuncu 1 (Yeşil) - Seviye: 0 | Oyuncu 2 (Mavi) - Seviye: 0
+            </div>
+            <div id="turnInfo" class="info-box">
+                Oyuna başlamak için Başlat'a basın.
+            </div>
+        </div>
+
+        <canvas id="gameCanvas" width="400" height="400"></canvas>
+
+        <div id="messageBox" class="message-box">
+            İpuçları: Oyuncu 1: W,A,S,D | Oyuncu 2: Yön Tuşları
+        </div>
+
+        <button id="startButton">Başlat</button>
+    </div>
+
+    <script>
+        // Canvas ve Context
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+
+        // DOM Elementleri
+        const playerInfoElement = document.getElementById('playerInfo');
+        const turnInfoElement = document.getElementById('turnInfo');
+        const messageBoxElement = document.getElementById('messageBox');
+        const startButton = document.getElementById('startButton');
+
+        // Oyun Ayarları
+        const GRID_SIZE = 20; // Her bir kare boyutu
+        const TILE_COUNT = canvas.width / GRID_SIZE; // Oyun alanındaki kare sayısı
+        const INITIAL_SNAKE_LENGTH = 3;
+        const MAX_STAGES = 3;
+        const STAGE_TARGET_SCORES = { 1: 3, 2: 5, 3: 7 }; // Her seviye için hedef yem sayısı
+        let GAME_SPEED_MS = 150; // Milisaniye cinsinden oyun hızı
+
+        // Oyuncu Nesneleri
+        let p1 = {
+            parts: [],
+            direction: 'right',
+            nextDirection: 'right',
+            stage: 0,
+            color: '#68d391', // Tailwind green-400
+            keys: { up: 'w', down: 's', left: 'a', right: 'd' }
+        };
+        let p2 = {
+            parts: [],
+            direction: 'right',
+            nextDirection: 'right',
+            stage: 0,
+            color: '#63b3ed', // Tailwind blue-400
+            keys: { up: 'ArrowUp', down: 'ArrowDown', left: 'ArrowLeft', right: 'ArrowRight' }
+        };
+        let activePlayer; // Aktif oyuncuyu tutar (p1 veya p2)
+
+        // Oyun Durumu
+        let currentPlayer = 1; // 1 veya 2
+        let currentPlayingStage = 1; // 1, 2, veya 3
+        let score = 0;
+        let food = { x: 0, y: 0 };
+        let gameInterval;
+        let gameActive = false;
+
+        // Başlangıç Fonksiyonu
+        startButton.addEventListener('click', initGame);
+
+        function initGame() {
+            startButton.disabled = true;
+            messageBoxElement.classList.remove('game-over-message');
+            messageBoxElement.style.backgroundColor = '#38a169'; // Default green
+
+            p1.stage = 0;
+            p2.stage = 0;
+            currentPlayingStage = 1;
+            currentPlayer = 1; // Oyuncu 1 her zaman yeni bir oyuna başlar
+            
+            setupNewStage();
+        }
+
+        function setupNewStage() {
+            score = 0;
+            gameActive = true;
+
+            if (currentPlayer === 1) {
+                activePlayer = p1;
+            } else {
+                activePlayer = p2;
+            }
+
+            // Aktif oyuncunun yılanını sıfırla
+            activePlayer.parts = [];
+            const startY = (currentPlayer === 1) ? 5 : TILE_COUNT - 6; // Farklı başlangıç satırları
+            const startX = Math.floor(TILE_COUNT / 2);
+            for (let i = 0; i < INITIAL_SNAKE_LENGTH; i++) {
+                activePlayer.parts.push({ x: startX - i, y: startY });
+            }
+            activePlayer.direction = 'right';
+            activePlayer.nextDirection = 'right';
+            
+            GAME_SPEED_MS = 150 - ((currentPlayingStage -1) * 20); // Seviye arttıkça hızlanır
+
+            spawnFood();
+            updateDisplay();
+            messageBoxElement.textContent = `Oyuncu ${currentPlayer}, Seviye ${currentPlayingStage}. Başarılar!`;
+            
+            clearInterval(gameInterval); // Önceki interval'i temizle
+            gameInterval = setInterval(gameLoop, GAME_SPEED_MS);
+        }
+
+        function gameLoop() {
+            if (!gameActive) return;
+
+            // Yönü güncelle (ani ters dönüşü engellemek için)
+            if (activePlayer.nextDirection !== activePlayer.direction) {
+                 // 180 derece dönüş kontrolü
+                const isOppositeDirection = 
+                    (activePlayer.direction === 'up' && activePlayer.nextDirection === 'down') ||
+                    (activePlayer.direction === 'down' && activePlayer.nextDirection === 'up') ||
+                    (activePlayer.direction === 'left' && activePlayer.nextDirection === 'right') ||
+                    (activePlayer.direction === 'right' && activePlayer.nextDirection === 'left');
+                
+                if (!isOppositeDirection || activePlayer.parts.length === 1) { // Tek parçalı yılan dönebilir
+                     activePlayer.direction = activePlayer.nextDirection;
+                } else {
+                    activePlayer.nextDirection = activePlayer.direction; // Geçersiz dönüş, eski yöne geri dön
+                }
+            }
+
+
+            // Yılanı hareket ettir
+            let head = { ...activePlayer.parts[0] }; // Kafa kopyası
+            switch (activePlayer.direction) {
+                case 'up': head.y--; break;
+                case 'down': head.y++; break;
+                case 'left': head.x--; break;
+                case 'right': head.x++; break;
+            }
+
+            // Çarpışma Kontrolleri
+            // Duvar çarpışması
+            if (head.x < 0 || head.x >= TILE_COUNT || head.y < 0 || head.y >= TILE_COUNT) {
+                gameOver();
+                return;
+            }
+            // Kendi kendine çarpışma
+            for (let i = 1; i < activePlayer.parts.length; i++) {
+                if (head.x === activePlayer.parts[i].x && head.y === activePlayer.parts[i].y) {
+                    gameOver();
+                    return;
+                }
+            }
+
+            // Yılanın yeni kafasını ekle
+            activePlayer.parts.unshift(head);
+
+            // Yem yeme kontrolü
+            if (head.x === food.x && head.y === food.y) {
+                score++;
+                updateDisplay();
+                if (score >= STAGE_TARGET_SCORES[currentPlayingStage]) {
+                    stageAchieved();
+                } else {
+                    spawnFood();
+                }
+            } else {
+                activePlayer.parts.pop(); // Yem yemezse kuyruğu kaldır
+            }
+
+            drawGame();
+        }
+
+        function stageAchieved() {
+            clearInterval(gameInterval);
+            gameActive = false;
+
+            activePlayer.stage = currentPlayingStage;
+            updateDisplay();
+
+            messageBoxElement.textContent = `Tebrikler Oyuncu ${currentPlayer}! Seviye ${currentPlayingStage}'i tamamladın.`;
+
+            // İki oyuncu da mevcut seviyeyi tamamladı mı?
+            if (p1.stage >= currentPlayingStage && p2.stage >= currentPlayingStage) {
+                if (currentPlayingStage === MAX_STAGES) {
+                    gameWon();
+                } else {
+                    // İkisi de bu seviyeyi bitirdi, sonraki seviyeye geç
+                    currentPlayingStage++;
+                    currentPlayer = 1; // Oyuncu 1 sonraki seviyeye başlar
+                    messageBoxElement.textContent += ` Şimdi Seviye ${currentPlayingStage} başlıyor! Oyuncu 1 hazırlanıyor...`;
+                    setTimeout(setupNewStage, 3000);
+                }
+            } else {
+                // Mevcut oyuncu bitirdi, diğer oyuncu aynı seviyeyi oynayacak
+                currentPlayer = (currentPlayer === 1) ? 2 : 1;
+                messageBoxElement.textContent += ` Şimdi Oyuncu ${currentPlayer}'in sırası (Seviye ${currentPlayingStage})...`;
+                setTimeout(setupNewStage, 3000);
+            }
+        }
+
+        function gameOver() {
+            clearInterval(gameInterval);
+            gameActive = false;
+            messageBoxElement.textContent = `Oyun Bitti! Oyuncu ${currentPlayer}, Seviye ${currentPlayingStage}'de başarısız oldu. Yeniden denemek için Başlat'a basın.`;
+            messageBoxElement.classList.add('game-over-message');
+            messageBoxElement.style.backgroundColor = '#e53e3e'; // Red for game over
+
+            p1.stage = 0; // Oyunu tam sıfırla
+            p2.stage = 0;
+            currentPlayingStage = 1; // Bir sonraki oyun için hazırla
+            startButton.disabled = false;
+        }
+
+        function gameWon() {
+            clearInterval(gameInterval);
+            gameActive = false;
+            messageBoxElement.textContent = `🎉 Tebrikler! İki oyuncu da ${MAX_STAGES} seviyeyi tamamladı ve oyunu kazandı! 🎉 Yeniden oynamak için Başlat'a basın.`;
+            messageBoxElement.style.backgroundColor = '#38a169'; // Green for win
+            p1.stage = 0;
+            p2.stage = 0;
+            currentPlayingStage = 1;
+            startButton.disabled = false;
+        }
+
+        function spawnFood() {
+            let foodOnSnake;
+            do {
+                foodOnSnake = false;
+                food.x = Math.floor(Math.random() * TILE_COUNT);
+                food.y = Math.floor(Math.random() * TILE_COUNT);
+                // Yemin yılanın üzerinde olup olmadığını kontrol et
+                for (const part of activePlayer.parts) {
+                    if (part.x === food.x && part.y === food.y) {
+                        foodOnSnake = true;
+                        break;
+                    }
+                }
+            } while (foodOnSnake);
+        }
+
+        function drawGame() {
+            // Arka planı temizle
+            ctx.fillStyle = '#1a202c'; // Tailwind gray-900 (canvas background)
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+
+            // Yemi çiz
+            ctx.fillStyle = '#f56565'; // Tailwind red-500
+            ctx.fillRect(food.x * GRID_SIZE, food.y * GRID_SIZE, GRID_SIZE -2 , GRID_SIZE -2 );
+            ctx.strokeStyle = '#c53030'; // Tailwind red-700
+            ctx.strokeRect(food.x * GRID_SIZE, food.y * GRID_SIZE, GRID_SIZE -2 , GRID_SIZE -2 );
+
+
+            // Aktif yılanı çiz
+            ctx.fillStyle = activePlayer.color;
+            activePlayer.parts.forEach((part, index) => {
+                ctx.fillRect(part.x * GRID_SIZE, part.y * GRID_SIZE, GRID_SIZE -2, GRID_SIZE -2);
+                if (index === 0) { // Yılanın kafası için göz
+                    ctx.fillStyle = 'white';
+                    // Yönüne göre göz pozisyonu
+                    let eyeX = part.x * GRID_SIZE;
+                    let eyeY = part.y * GRID_SIZE;
+                    const eyeSize = GRID_SIZE / 5;
+
+                    if (activePlayer.direction === 'right') { eyeX += GRID_SIZE * 0.6; eyeY += GRID_SIZE * 0.2; }
+                    else if (activePlayer.direction === 'left') { eyeX += GRID_SIZE * 0.2; eyeY += GRID_SIZE * 0.2; }
+                    else if (activePlayer.direction === 'up') { eyeX += GRID_SIZE * 0.2; eyeY += GRID_SIZE * 0.2; }
+                    else if (activePlayer.direction === 'down') { eyeX += GRID_SIZE * 0.2; eyeY += GRID_SIZE * 0.6; }
+                    
+                    ctx.beginPath();
+                    ctx.arc(eyeX + eyeSize/2, eyeY + eyeSize/2, eyeSize, 0, 2 * Math.PI);
+                    ctx.fill();
+                    
+                    if (activePlayer.direction === 'right') { eyeY += GRID_SIZE * 0.4;}
+                    else if (activePlayer.direction === 'left') { eyeY += GRID_SIZE * 0.4;}
+                    else if (activePlayer.direction === 'up') { eyeX += GRID_SIZE * 0.4;}
+                    else if (activePlayer.direction === 'down') { eyeX += GRID_SIZE * 0.4;}
+
+                    ctx.beginPath();
+                    ctx.arc(eyeX + eyeSize/2, eyeY + eyeSize/2, eyeSize, 0, 2 * Math.PI);
+                    ctx.fill();
+
+                    ctx.fillStyle = activePlayer.color; // Rengi eski haline getir
+                }
+            });
+        }
+
+        function updateDisplay() {
+            playerInfoElement.innerHTML = `
+                <span class="player1-text">Oyuncu 1 (Yeşil) - Seviye: ${p1.stage}/${MAX_STAGES}</span> | 
+                <span class="player2-text">Oyuncu 2 (Mavi) - Seviye: ${p2.stage}/${MAX_STAGES}</span>
+            `;
+            if (gameActive) {
+                turnInfoElement.textContent = `Sıra: Oyuncu ${currentPlayer} (${activePlayer.color === p1.color ? 'Yeşil' : 'Mavi'}) | Seviye: ${currentPlayingStage} | Hedef Yem: ${STAGE_TARGET_SCORES[currentPlayingStage]} | Toplanan: ${score}`;
+            } else if (!startButton.disabled) { // Oyun bittiğinde veya başlamadığında
+                 turnInfoElement.textContent = "Oyuna başlamak için Başlat'a basın.";
+            }
+        }
+
+        // Klavye Dinleyicisi
+        document.addEventListener('keydown', (e) => {
+            if (!gameActive) return;
+
+            const key = e.key.toLowerCase(); // WASD için küçük harf kontrolü
+
+            if (currentPlayer === 1) {
+                if (key === p1.keys.up ) p1.nextDirection = 'up';
+                else if (key === p1.keys.down ) p1.nextDirection = 'down';
+                else if (key === p1.keys.left ) p1.nextDirection = 'left';
+                else if (key === p1.keys.right ) p1.nextDirection = 'right';
+            } else { // currentPlayer === 2
+                if (key === p2.keys.up.toLowerCase()) p2.nextDirection = 'up'; // Arrow keys are not lowercased
+                else if (key === p2.keys.down.toLowerCase()) p2.nextDirection = 'down';
+                else if (key === p2.keys.left.toLowerCase()) p2.nextDirection = 'left';
+                else if (key === p2.keys.right.toLowerCase()) p2.nextDirection = 'right';
+            }
+        });
+
+        // İlk ekranı ayarla
+        updateDisplay();
+    </script>
+</body>
+</html>
